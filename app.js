@@ -3,17 +3,22 @@ let img;
 let canvas;
 let faceApiReady = false;
 
+// Filter state
+let filters = {
+    people: true,
+    demographics: true,
+    animals: true
+};
+
 function setup() {
-    // Cargar modelo COCO-SSD de ml5
     console.log("Iniciando carga de modelos...");
-    updateStatus("Cargando modelo básico (COCO-SSD)...", true);
+    updateStatus("Cargando modelos de IA...", true);
     objectDetector = ml5.objectDetector('cocossd', {}, modelLoaded);
 
-    // Cargar modelos de FaceAPI
     loadFaceApiModels();
 
+    // File uploader
     const uploader = document.getElementById('uploader');
-
     uploader.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -28,24 +33,50 @@ function setup() {
             reader.readAsDataURL(file);
         }
     });
+
+    // Filter buttons
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const filterName = btn.dataset.filter;
+            filters[filterName] = !filters[filterName];
+            btn.classList.toggle('active', filters[filterName]);
+            updateStatBoxVisibility();
+        });
+    });
+
+    updateStatBoxVisibility();
+}
+
+function updateStatBoxVisibility() {
+    // People box
+    const boxTotal = document.getElementById('box-total');
+    if (boxTotal) boxTotal.style.display = filters.people ? 'block' : 'none';
+
+    // Demographics boxes
+    const boxMen = document.getElementById('box-men');
+    const boxWomen = document.getElementById('box-women');
+    const boxChildren = document.getElementById('box-children');
+    const showDemo = filters.demographics;
+    if (boxMen) boxMen.style.display = showDemo ? 'block' : 'none';
+    if (boxWomen) boxWomen.style.display = showDemo ? 'block' : 'none';
+    if (boxChildren) boxChildren.style.display = showDemo ? 'block' : 'none';
+
+    // Animals box
+    const boxAnimals = document.getElementById('box-animals');
+    if (boxAnimals) boxAnimals.style.display = filters.animals ? 'block' : 'none';
 }
 
 async function loadFaceApiModels() {
     try {
-        updateStatus("Cargando inteligencia avanzada...", true);
         await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
         await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
         await faceapi.nets.ageGenderNet.loadFromUri('./models');
         console.log("Modelos FaceAPI cargados.");
         faceApiReady = true;
-        // Si ya había terminado COCO-SSD, esto limpiará el mensaje
-        const statusEl = document.getElementById('status-message');
-        if (statusEl.innerText.includes("Cargando inteligencia")) {
-            updateStatus("", false);
-        }
+        updateStatus("", false);
     } catch (err) {
         console.error("Error cargando modelos FaceAPI:", err);
-        updateStatus("Error cargando IA avanzada: " + err.message, true);
+        updateStatus("Error cargando IA: " + err.message, true);
     }
 }
 
@@ -58,7 +89,6 @@ function updateStatus(msg, show) {
     if (statusEl) {
         statusEl.innerText = msg;
         statusEl.style.display = show ? 'block' : 'none';
-        console.log("Estado:", msg);
     }
 }
 
@@ -75,33 +105,40 @@ function resetStats() {
 function imageReady() {
     updateStatus('Analizando imagen...', true);
 
-    // Ajustar canvas
     if (canvas) canvas.remove();
     canvas = createCanvas(img.width, img.height);
     canvas.parent('canvas-container');
     image(img, 0, 0);
 
-    // Ejecutar COCO-SSD (Personas y Animales)
-    objectDetector.detect(img, gotCocoResult);
+    // Run COCO-SSD if people or animals are selected
+    if (filters.people || filters.animals) {
+        objectDetector.detect(img, gotCocoResult);
+    } else {
+        document.getElementById('stats-display').style.display = 'flex';
+    }
 
-    // Ejecutar FaceAPI con reintento si es necesario
-    runFaceApiWithRetry();
+    // Run FaceAPI if demographics are selected
+    if (filters.demographics) {
+        runFaceApiWithRetry();
+    } else {
+        // If no demographics, clear the status after COCO
+        if (!filters.people && !filters.animals) {
+            updateStatus('', false);
+        }
+    }
 }
 
 function runFaceApiWithRetry(attempts = 0) {
     if (faceApiReady) {
         detectFaces().catch(err => {
             console.error("Error en FaceAPI:", err);
-            updateStatus("Error analizando caras: " + err.message, true);
         });
     } else {
         if (attempts < 5) {
-            console.warn(`FaceAPI no listo. Reintento ${attempts + 1}...`);
-            updateStatus(`Cargando módulos de IA (${attempts + 1}/5)...`, true);
+            updateStatus(`Cargando IA (${attempts + 1}/5)...`, true);
             setTimeout(() => runFaceApiWithRetry(attempts + 1), 1000);
         } else {
-            console.error("FaceAPI Timeout.");
-            updateStatus("La IA avanzada tardó demasiado en cargar. Mostrando resultados básicos.", true);
+            updateStatus("IA avanzada no disponible.", true);
         }
     }
 }
@@ -109,50 +146,46 @@ function runFaceApiWithRetry(attempts = 0) {
 function gotCocoResult(err, results) {
     if (err) {
         console.error(err);
-        updateStatus('Error en detección básica: ' + err.message, true);
+        updateStatus('Error: ' + err.message, true);
         return;
     }
 
     const people = results.filter(obj => obj.label === 'person');
-    const animals = results.filter(obj => ['cat', 'dog', 'bird', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'].includes(obj.label));
+    const animalLabels = ['cat', 'dog', 'bird', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'];
+    const animals = results.filter(obj => animalLabels.includes(obj.label));
 
-    // Actualizar UI básica inmediatamente
     document.getElementById('stats-display').style.display = 'flex';
-    document.getElementById('count-total').innerText = people.length;
-    document.getElementById('count-animals').innerText = animals.length;
 
-    // Dibujar recuadros
-    drawBoxes(people, [0, 255, 0]); // Verde para personas
-    drawBoxes(animals, [255, 165, 0]); // Naranja para animales
+    if (filters.people) {
+        document.getElementById('count-total').innerText = people.length;
+        drawBoxes(people, [0, 200, 100]);
+    }
+
+    if (filters.animals) {
+        document.getElementById('count-animals').innerText = animals.length;
+        drawBoxes(animals, [255, 165, 0]);
+    }
+
+    // Clear status if not waiting for FaceAPI
+    if (!filters.demographics) {
+        updateStatus('', false);
+    }
 }
 
 async function detectFaces() {
-    // Asegurarse de que p5 haya creado el elemento DOM
     if (!img || !img.elt) {
-        throw new Error("Imagen no inicializada correctamente");
+        throw new Error("Imagen no lista");
     }
 
-    console.log("Iniciando detección de caras...");
-
-    // Usar una configuración explícita para TinyFaceDetector
-    // inputSize debe ser divisible por 32. 416 es standard.
-    // scoreThreshold 0.5 filtra detecciones débiles.
     const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
-
     const detections = await faceapi.detectAllFaces(img.elt, options)
         .withFaceLandmarks()
         .withAgeAndGender();
 
-    console.log(`Detecciones encontradas: ${detections.length}`);
-
-    let men = 0;
-    let women = 0;
-    let children = 0;
+    let men = 0, women = 0, children = 0;
 
     detections.forEach(d => {
         const { age, gender } = d;
-        console.log(`Cara: ${gender}, ${age.toFixed(1)} años`);
-
         if (age < 18) {
             children++;
         } else {
@@ -164,14 +197,6 @@ async function detectFaces() {
     document.getElementById('count-men').innerText = men;
     document.getElementById('count-women').innerText = women;
     document.getElementById('count-children').innerText = children;
-
-    // Dibujar caras (opcional, pero útil para debug)
-    /* 
-    const displaySize = { width: img.width, height: img.height };
-    faceapi.matchDimensions(canvas.elt, displaySize);
-    const resizedDetections = faceapi.resizeResults(detections, displaySize);
-    faceapi.draw.drawDetections(canvas.elt, resizedDetections);
-    */
 
     updateStatus('', false);
 }
@@ -188,7 +213,6 @@ function drawBoxes(objects, color) {
         textSize(16);
         text(obj.label, obj.x, obj.y > 10 ? obj.y - 5 : 10);
 
-        // Restaurar para el siguiente
         noFill();
         stroke(color[0], color[1], color[2]);
     });
