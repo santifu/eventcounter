@@ -2,12 +2,24 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transfo
 
 env.allowLocalModels = false;
 
-// State
 let detector = null;
 let crowdSession = null;
-let modelsReady = { detection: false, crowd: false };
 
 const CROWD_MODEL_URL = 'https://huggingface.co/muasifk/CSRNet/resolve/main/model1_A.onnx';
+
+// Object categories
+const CATEGORIES = {
+    person: { label: 'Personas', icon: '👤' },
+    dog: { label: 'Perros', icon: '🐕' },
+    cat: { label: 'Gatos', icon: '🐱' },
+    bird: { label: 'Pájaros', icon: '🐦' },
+    horse: { label: 'Caballos', icon: '🐴' },
+    cow: { label: 'Vacas', icon: '🐄' },
+    sheep: { label: 'Ovejas', icon: '🐑' },
+    car: { label: 'Coches', icon: '🚗' },
+    bicycle: { label: 'Bicis', icon: '🚲' },
+    motorcycle: { label: 'Motos', icon: '🏍️' }
+};
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -20,46 +32,41 @@ function setupUploader() {
     document.getElementById('uploader').addEventListener('change', handleImageUpload);
 }
 
-// === MODEL LOADING ===
-
 async function loadModels() {
-    showModelProgress(true);
-    setProgressText('Descargando DETR...');
+    setProgress(0, 'Descargando modelo DETR...');
 
     try {
         detector = await pipeline('object-detection', 'Xenova/detr-resnet-50', {
             progress_callback: (p) => {
-                if (p.status === 'progress') {
-                    const pct = Math.round((p.loaded / p.total) * 60);
-                    setProgress(pct);
+                if (p.status === 'progress' && p.total) {
+                    const pct = Math.round((p.loaded / p.total) * 70);
+                    setProgress(pct, 'Descargando DETR... ' + pct + '%');
                 }
             }
         });
-        modelsReady.detection = true;
 
-        setProgressText('Descargando CSRNet...');
-        setProgress(65);
+        setProgress(75, 'Descargando modelo de densidad...');
 
         try {
             crowdSession = await ort.InferenceSession.create(CROWD_MODEL_URL, {
                 executionProviders: ['wasm']
             });
-            modelsReady.crowd = true;
+            setProgress(95, 'CSRNet cargado');
         } catch (e) {
             console.warn('CSRNet no disponible:', e.message);
+            setProgress(95, 'Solo detección disponible');
         }
 
-        setProgress(100);
-        setProgressText('¡Modelos listos!');
+        setProgress(100, '¡Listo!');
 
         setTimeout(() => {
-            showModelProgress(false);
+            hideProgress();
             enableUpload();
-        }, 500);
+        }, 800);
 
     } catch (err) {
-        console.error('Error cargando modelos:', err);
-        setProgressText('Error: ' + err.message);
+        console.error('Error:', err);
+        setProgress(0, 'Error: ' + err.message);
     }
 }
 
@@ -70,14 +77,12 @@ function enableUpload() {
     text.innerHTML = '<strong>Seleccionar imagen</strong><br>o arrastrar aquí';
 }
 
-// === IMAGE ANALYSIS ===
-
 async function handleImageUpload(e) {
     const file = e.target.files[0];
-    if (!file || !modelsReady.detection) return;
+    if (!file || !detector) return;
 
     hideResults();
-    showAnalysisSteps(true);
+    showStatus('<span class="spinner"></span> Analizando imagen...');
 
     const img = new Image();
     img.onload = () => analyzeImage(img);
@@ -85,42 +90,30 @@ async function handleImageUpload(e) {
 }
 
 async function analyzeImage(img) {
-    let detectionCount = null;
+    let detectionResults = [];
     let crowdCount = null;
 
-    // Step 1: Load image
-    setStep('load', 'active');
-    await delay(300);
-    setStep('load', 'done');
-
-    // Step 2: DETR detection
-    setStep('detect', 'active');
+    // DETR detection
     try {
-        const results = await detector(img.src, { threshold: 0.7 });
-        const people = results.filter(r => r.label === 'person');
-        detectionCount = people.length;
-        drawDetections(img, results);
+        showStatus('<span class="spinner"></span> Detectando objetos...');
+        detectionResults = await detector(img.src, { threshold: 0.6 });
     } catch (err) {
-        console.error('Error DETR:', err);
+        console.error('DETR error:', err);
     }
-    setStep('detect', 'done');
 
-    // Step 3: CSRNet density
+    // CSRNet density
     if (crowdSession) {
-        setStep('density', 'active');
         try {
+            showStatus('<span class="spinner"></span> Estimando densidad...');
             crowdCount = await runCrowdModel(img);
         } catch (err) {
-            console.error('Error CSRNet:', err);
+            console.error('CSRNet error:', err);
         }
-        setStep('density', 'done');
-    } else {
-        setStep('density', 'done'); // Skip
     }
 
-    await delay(300);
-    showAnalysisSteps(false);
-    showResults(detectionCount, crowdCount);
+    hideStatus();
+    showResults(detectionResults, crowdCount);
+    drawDetections(img, detectionResults);
 }
 
 async function runCrowdModel(img) {
@@ -145,51 +138,59 @@ async function runCrowdModel(img) {
     const densityData = output[Object.keys(output)[0]].data;
 
     let count = 0;
-    for (let i = 0; i < densityData.length; i++) {
-        count += densityData[i];
-    }
+    for (let i = 0; i < densityData.length; i++) count += densityData[i];
     return Math.round(count);
 }
 
-// === RESULTS ===
+function showResults(results, crowdCount) {
+    // Count by category
+    const counts = {};
+    results.forEach(r => {
+        counts[r.label] = (counts[r.label] || 0) + 1;
+    });
 
-function showResults(detection, crowd) {
-    document.getElementById('results').style.display = 'block';
-    document.getElementById('count-detection').textContent = detection ?? '-';
+    // Build grid HTML
+    const grid = document.getElementById('result-grid');
+    grid.innerHTML = '';
 
-    const rowCrowd = document.getElementById('row-crowd');
-    if (crowd !== null) {
-        document.getElementById('count-crowd').textContent = crowd;
-        rowCrowd.style.display = 'flex';
-    } else {
-        rowCrowd.style.display = 'none';
+    Object.keys(counts).forEach(label => {
+        const cat = CATEGORIES[label] || { label: label, icon: '📦' };
+        const item = document.createElement('div');
+        item.className = 'result-item';
+        item.innerHTML = `
+            <div class="result-item-value">${counts[label]}</div>
+            <div class="result-item-label">${cat.icon} ${cat.label}</div>
+        `;
+        grid.appendChild(item);
+    });
+
+    // Add crowd estimate if available
+    if (crowdCount !== null) {
+        const item = document.createElement('div');
+        item.className = 'result-item';
+        item.style.background = '#fef3c7';
+        item.innerHTML = `
+            <div class="result-item-value">${crowdCount}</div>
+            <div class="result-item-label">👥 Densidad</div>
+        `;
+        grid.appendChild(item);
     }
 
-    let final, note;
+    // Total people
+    const personCount = counts['person'] || 0;
+    let finalCount = personCount;
+    let note = '';
 
-    if (detection !== null && crowd !== null) {
-        if (crowd > detection * 2) {
-            final = crowd;
-            note = 'Escena densa: usando estimación por densidad';
-        } else if (detection > crowd) {
-            final = detection;
-            note = 'Personas visibles: usando detección directa';
-        } else {
-            final = Math.round((detection + crowd) / 2);
-            note = 'Promedio de ambos métodos';
-        }
-    } else {
-        final = detection ?? crowd ?? '-';
-        note = detection !== null ? 'Solo detección disponible' : 'Solo estimación por densidad';
+    if (crowdCount !== null && crowdCount > personCount * 2) {
+        finalCount = crowdCount;
+        note = 'Usando estimación por densidad (escena densa)';
+    } else if (personCount > 0) {
+        note = 'Usando detección directa';
     }
 
-    document.getElementById('count-total').textContent = final;
+    document.getElementById('count-total').textContent = finalCount;
     document.getElementById('result-note').textContent = note;
-}
-
-function hideResults() {
-    document.getElementById('results').style.display = 'none';
-    document.getElementById('canvas-container').style.display = 'none';
+    document.getElementById('results').style.display = 'block';
 }
 
 function drawDetections(img, results) {
@@ -205,63 +206,54 @@ function drawDetections(img, results) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
 
-    results.forEach(({ label, score, box }) => {
-        if (label !== 'person') return;
-        const { xmin, ymin, xmax, ymax } = box;
+    const colors = {
+        person: '#22c55e',
+        dog: '#f59e0b',
+        cat: '#8b5cf6',
+        default: '#64748b'
+    };
 
-        ctx.strokeStyle = '#1a1a2e';
+    results.forEach(({ label, score, box }) => {
+        const { xmin, ymin, xmax, ymax } = box;
+        const color = colors[label] || colors.default;
+
+        ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.strokeRect(xmin, ymin, xmax - xmin, ymax - ymin);
 
-        ctx.font = '12px Inter, sans-serif';
-        ctx.fillStyle = '#1a1a2e';
-        ctx.fillText(`${Math.round(score * 100)}%`, xmin + 4, ymin + 14);
+        const text = `${label} ${Math.round(score * 100)}%`;
+        ctx.font = 'bold 11px Inter, sans-serif';
+        const textWidth = ctx.measureText(text).width;
+
+        ctx.fillStyle = color;
+        ctx.fillRect(xmin, ymin - 18, textWidth + 8, 18);
+
+        ctx.fillStyle = '#fff';
+        ctx.fillText(text, xmin + 4, ymin - 5);
     });
 }
 
-// === UI HELPERS ===
-
-function showModelProgress(show) {
-    document.getElementById('model-progress').style.display = show ? 'block' : 'none';
+function hideResults() {
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('canvas-container').style.display = 'none';
 }
 
-function setProgress(pct) {
+function setProgress(pct, text) {
     document.getElementById('progress-fill').style.width = pct + '%';
     document.getElementById('progress-percent').textContent = pct + '%';
-}
-
-function setProgressText(text) {
     document.getElementById('progress-text').textContent = text;
 }
 
-function showAnalysisSteps(show) {
-    const el = document.getElementById('analysis-steps');
-    el.style.display = show ? 'block' : 'none';
-
-    if (show) {
-        // Reset all steps
-        ['load', 'detect', 'density'].forEach(id => {
-            const step = document.getElementById(`step-${id}`);
-            const icon = document.getElementById(`step-${id}-icon`);
-            step.className = 'step';
-            icon.innerHTML = '○';
-        });
-    }
+function hideProgress() {
+    document.getElementById('progress-section').classList.add('hidden');
 }
 
-function setStep(id, state) {
-    const step = document.getElementById(`step-${id}`);
-    const icon = document.getElementById(`step-${id}-icon`);
-
-    step.className = 'step ' + state;
-
-    if (state === 'active') {
-        icon.innerHTML = '<div class="spinner"></div>';
-    } else if (state === 'done') {
-        icon.innerHTML = '✓';
-    }
+function showStatus(html) {
+    const el = document.getElementById('status-text');
+    el.innerHTML = html;
+    el.classList.remove('hidden');
 }
 
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function hideStatus() {
+    document.getElementById('status-text').classList.add('hidden');
 }
