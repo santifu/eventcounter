@@ -44,6 +44,7 @@ function imageReady() {
 function gotResult(err, results) {
     if (err) {
         console.error(err);
+        document.getElementById('counter').innerText = 'Error: ' + err.message || err;
         return;
     }
 
