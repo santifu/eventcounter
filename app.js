@@ -10,6 +10,9 @@ function setup() {
     uploader.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
+            // Mostrar estado de carga
+            document.getElementById('counter').innerText = 'Cargando imagen...';
+
             const reader = new FileReader();
             reader.onload = (event) => {
                 img = createImg(event.target.result, imageReady);
@@ -25,6 +28,9 @@ function modelLoaded() {
 }
 
 function imageReady() {
+    // Mostrar estado de análisis
+    document.getElementById('counter').innerText = 'Analizando imagen...';
+
     // Ajustar el canvas al tamaño de la imagen
     if (canvas) canvas.remove();
     canvas = createCanvas(img.width, img.height);
