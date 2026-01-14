@@ -7,7 +7,6 @@ let detector = null;
 let crowdSession = null;
 let modelsReady = { detection: false, crowd: false };
 
-// CSRNet model URL
 const CROWD_MODEL_URL = 'https://huggingface.co/muasifk/CSRNet/resolve/main/model1_A.onnx';
 
 document.addEventListener('DOMContentLoaded', init);
@@ -21,46 +20,46 @@ function setupUploader() {
     document.getElementById('uploader').addEventListener('change', handleImageUpload);
 }
 
+// === MODEL LOADING ===
+
 async function loadModels() {
-    showLoading(true);
-    updateStatus('Cargando modelo de detección...');
+    showModelProgress(true);
+    setProgressText('Descargando DETR...');
 
     try {
-        // Load DETR
         detector = await pipeline('object-detection', 'Xenova/detr-resnet-50', {
             progress_callback: (p) => {
                 if (p.status === 'progress') {
-                    setProgress(Math.round((p.loaded / p.total) * 50));
+                    const pct = Math.round((p.loaded / p.total) * 60);
+                    setProgress(pct);
                 }
             }
         });
         modelsReady.detection = true;
-        console.log('DETR cargado.');
 
-        // Try loading CSRNet (optional)
-        updateStatus('Cargando modelo de densidad...');
-        setProgress(60);
+        setProgressText('Descargando CSRNet...');
+        setProgress(65);
 
         try {
             crowdSession = await ort.InferenceSession.create(CROWD_MODEL_URL, {
                 executionProviders: ['wasm']
             });
             modelsReady.crowd = true;
-            console.log('CSRNet cargado.');
-        } catch (crowdErr) {
-            console.warn('CSRNet no disponible:', crowdErr.message);
-            // Continue without crowd model
+        } catch (e) {
+            console.warn('CSRNet no disponible:', e.message);
         }
 
         setProgress(100);
-        showLoading(false);
-        updateStatus('');
-        enableUpload();
+        setProgressText('¡Modelos listos!');
+
+        setTimeout(() => {
+            showModelProgress(false);
+            enableUpload();
+        }, 500);
 
     } catch (err) {
         console.error('Error cargando modelos:', err);
-        updateStatus('Error: ' + err.message);
-        showLoading(false);
+        setProgressText('Error: ' + err.message);
     }
 }
 
@@ -71,12 +70,14 @@ function enableUpload() {
     text.innerHTML = '<strong>Seleccionar imagen</strong><br>o arrastrar aquí';
 }
 
+// === IMAGE ANALYSIS ===
+
 async function handleImageUpload(e) {
     const file = e.target.files[0];
     if (!file || !modelsReady.detection) return;
 
-    updateStatus('Analizando imagen...');
     hideResults();
+    showAnalysisSteps(true);
 
     const img = new Image();
     img.onload = () => analyzeImage(img);
@@ -87,9 +88,14 @@ async function analyzeImage(img) {
     let detectionCount = null;
     let crowdCount = null;
 
-    // Run DETR detection
+    // Step 1: Load image
+    setStep('load', 'active');
+    await delay(300);
+    setStep('load', 'done');
+
+    // Step 2: DETR detection
+    setStep('detect', 'active');
     try {
-        updateStatus('Detectando personas...');
         const results = await detector(img.src, { threshold: 0.7 });
         const people = results.filter(r => r.label === 'person');
         detectionCount = people.length;
@@ -97,20 +103,24 @@ async function analyzeImage(img) {
     } catch (err) {
         console.error('Error DETR:', err);
     }
+    setStep('detect', 'done');
 
-    // Run CSRNet if available
+    // Step 3: CSRNet density
     if (crowdSession) {
+        setStep('density', 'active');
         try {
-            updateStatus('Estimando densidad...');
             crowdCount = await runCrowdModel(img);
         } catch (err) {
             console.error('Error CSRNet:', err);
         }
+        setStep('density', 'done');
+    } else {
+        setStep('density', 'done'); // Skip
     }
 
-    // Show results
+    await delay(300);
+    showAnalysisSteps(false);
     showResults(detectionCount, crowdCount);
-    updateStatus('');
 }
 
 async function runCrowdModel(img) {
@@ -123,7 +133,6 @@ async function runCrowdModel(img) {
     const imageData = ctx.getImageData(0, 0, 1024, 768);
     const { data } = imageData;
 
-    // Prepare tensor (CHW, /255)
     const floatData = new Float32Array(3 * 1024 * 768);
     for (let i = 0; i < 1024 * 768; i++) {
         floatData[i] = data[i * 4] / 255;
@@ -142,14 +151,12 @@ async function runCrowdModel(img) {
     return Math.round(count);
 }
 
+// === RESULTS ===
+
 function showResults(detection, crowd) {
     document.getElementById('results').style.display = 'block';
+    document.getElementById('count-detection').textContent = detection ?? '-';
 
-    // Detection result
-    document.getElementById('count-detection').textContent =
-        detection !== null ? detection : '-';
-
-    // Crowd result
     const rowCrowd = document.getElementById('row-crowd');
     if (crowd !== null) {
         document.getElementById('count-crowd').textContent = crowd;
@@ -158,12 +165,9 @@ function showResults(detection, crowd) {
         rowCrowd.style.display = 'none';
     }
 
-    // Calculate final estimate
-    let final;
-    let note = '';
+    let final, note;
 
     if (detection !== null && crowd !== null) {
-        // Use higher value for crowds, average for small groups
         if (crowd > detection * 2) {
             final = crowd;
             note = 'Escena densa: usando estimación por densidad';
@@ -174,15 +178,9 @@ function showResults(detection, crowd) {
             final = Math.round((detection + crowd) / 2);
             note = 'Promedio de ambos métodos';
         }
-    } else if (detection !== null) {
-        final = detection;
-        note = 'Solo detección disponible';
-    } else if (crowd !== null) {
-        final = crowd;
-        note = 'Solo estimación por densidad';
     } else {
-        final = '-';
-        note = 'No se pudo analizar la imagen';
+        final = detection ?? crowd ?? '-';
+        note = detection !== null ? 'Solo detección disponible' : 'Solo estimación por densidad';
     }
 
     document.getElementById('count-total').textContent = final;
@@ -209,28 +207,61 @@ function drawDetections(img, results) {
 
     results.forEach(({ label, score, box }) => {
         if (label !== 'person') return;
-
         const { xmin, ymin, xmax, ymax } = box;
 
         ctx.strokeStyle = '#1a1a2e';
         ctx.lineWidth = 2;
         ctx.strokeRect(xmin, ymin, xmax - xmin, ymax - ymin);
 
-        const text = `${Math.round(score * 100)}%`;
         ctx.font = '12px Inter, sans-serif';
         ctx.fillStyle = '#1a1a2e';
-        ctx.fillText(text, xmin + 4, ymin + 14);
+        ctx.fillText(`${Math.round(score * 100)}%`, xmin + 4, ymin + 14);
     });
 }
 
-function updateStatus(msg) {
-    document.getElementById('status-message').textContent = msg;
-}
+// === UI HELPERS ===
 
-function showLoading(show) {
-    document.getElementById('loading-bar').style.display = show ? 'block' : 'none';
+function showModelProgress(show) {
+    document.getElementById('model-progress').style.display = show ? 'block' : 'none';
 }
 
 function setProgress(pct) {
-    document.getElementById('loading-bar-fill').style.width = pct + '%';
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-percent').textContent = pct + '%';
+}
+
+function setProgressText(text) {
+    document.getElementById('progress-text').textContent = text;
+}
+
+function showAnalysisSteps(show) {
+    const el = document.getElementById('analysis-steps');
+    el.style.display = show ? 'block' : 'none';
+
+    if (show) {
+        // Reset all steps
+        ['load', 'detect', 'density'].forEach(id => {
+            const step = document.getElementById(`step-${id}`);
+            const icon = document.getElementById(`step-${id}-icon`);
+            step.className = 'step';
+            icon.innerHTML = '○';
+        });
+    }
+}
+
+function setStep(id, state) {
+    const step = document.getElementById(`step-${id}`);
+    const icon = document.getElementById(`step-${id}-icon`);
+
+    step.className = 'step ' + state;
+
+    if (state === 'active') {
+        icon.innerHTML = '<div class="spinner"></div>';
+    } else if (state === 'done') {
+        icon.innerHTML = '✓';
+    }
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
