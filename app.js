@@ -9,8 +9,8 @@ let crowdSession = null;
 let currentMode = 'detection';
 let modelsLoaded = { detection: false, crowd: false };
 
-// ONNX model URL for crowd counting
-const CROWD_MODEL_URL = 'https://huggingface.co/muasifk/crowd-counting-model/resolve/main/crowd_counting_model.onnx';
+// ONNX model URL for crowd counting (CSRNet from muasifk)
+const CROWD_MODEL_URL = 'https://huggingface.co/muasifk/CSRNet/resolve/main/model1_A.onnx';
 
 // Animal labels from COCO dataset
 const ANIMAL_LABELS = ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'];
@@ -179,9 +179,8 @@ async function analyzeCrowd(img) {
     try {
         updateStatus('Procesando mapa de densidad...', true);
 
-        // Prepare image for ONNX
-        const inputSize = 512;
-        const { tensor, originalWidth, originalHeight } = await prepareImageForONNX(img, inputSize);
+        // Prepare image for ONNX (CSRNet expects 1024x768)
+        const { tensor, originalWidth, originalHeight } = await prepareImageForONNX(img);
 
         // Run inference
         const feeds = { input: tensor };
@@ -208,42 +207,32 @@ async function analyzeCrowd(img) {
     }
 }
 
-async function prepareImageForONNX(img, targetSize) {
+async function prepareImageForONNX(img) {
+    // CSRNet expects 1024x768 input
+    const targetWidth = 1024;
+    const targetHeight = 768;
+
     const canvas = document.createElement('canvas');
-    canvas.width = targetSize;
-    canvas.height = targetSize;
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
     const ctx = canvas.getContext('2d');
 
-    // Resize maintaining aspect ratio
-    const scale = Math.min(targetSize / img.width, targetSize / img.height);
-    const scaledWidth = img.width * scale;
-    const scaledHeight = img.height * scale;
-    const offsetX = (targetSize - scaledWidth) / 2;
-    const offsetY = (targetSize - scaledHeight) / 2;
+    // Resize image to fill canvas
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, targetSize, targetSize);
-    ctx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
-
-    const imageData = ctx.getImageData(0, 0, targetSize, targetSize);
+    const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
     const { data } = imageData;
 
-    // Normalize and convert to tensor (CHW format)
-    const floatData = new Float32Array(3 * targetSize * targetSize);
-    const mean = [0.485, 0.456, 0.406];
-    const std = [0.229, 0.224, 0.225];
+    // Convert to RGB float tensor (CHW format), normalize by /255 only
+    const floatData = new Float32Array(3 * targetWidth * targetHeight);
 
-    for (let i = 0; i < targetSize * targetSize; i++) {
-        const r = data[i * 4] / 255;
-        const g = data[i * 4 + 1] / 255;
-        const b = data[i * 4 + 2] / 255;
-
-        floatData[i] = (r - mean[0]) / std[0];
-        floatData[targetSize * targetSize + i] = (g - mean[1]) / std[1];
-        floatData[2 * targetSize * targetSize + i] = (b - mean[2]) / std[2];
+    for (let i = 0; i < targetWidth * targetHeight; i++) {
+        floatData[i] = data[i * 4] / 255;                              // R
+        floatData[targetWidth * targetHeight + i] = data[i * 4 + 1] / 255;      // G
+        floatData[2 * targetWidth * targetHeight + i] = data[i * 4 + 2] / 255;  // B
     }
 
-    const tensor = new ort.Tensor('float32', floatData, [1, 3, targetSize, targetSize]);
+    const tensor = new ort.Tensor('float32', floatData, [1, 3, targetHeight, targetWidth]);
 
     return { tensor, originalWidth: img.width, originalHeight: img.height };
 }
