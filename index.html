@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Analizador de Aforo - IA Local</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -42,7 +43,7 @@
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
 
-        .filter-section {
+        .mode-section {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 16px;
             padding: 15px;
@@ -50,22 +51,21 @@
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
 
-        .filter-title {
+        .mode-title {
             font-weight: 600;
             color: #555;
             margin-bottom: 10px;
             font-size: 0.9em;
         }
 
-        .filter-buttons {
+        .mode-buttons {
             display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
+            gap: 10px;
             justify-content: center;
         }
 
-        .filter-btn {
-            padding: 10px 16px;
+        .mode-btn {
+            padding: 12px 20px;
             border: 2px solid #667eea;
             background: white;
             border-radius: 25px;
@@ -74,16 +74,13 @@
             transition: all 0.2s ease;
             color: #667eea;
             font-weight: 500;
+            flex: 1;
         }
 
-        .filter-btn.active {
+        .mode-btn.active {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border-color: transparent;
-        }
-
-        .filter-btn:hover {
-            transform: scale(1.05);
         }
 
         .upload-section {
@@ -140,34 +137,24 @@
             transition: width 0.3s ease;
         }
 
-        .stats-container {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin: 15px 0;
-            flex-wrap: wrap;
-        }
-
-        .stat-box {
+        .result-box {
             background: rgba(255, 255, 255, 0.95);
-            padding: 12px 15px;
-            border-radius: 12px;
+            padding: 20px;
+            border-radius: 16px;
+            margin: 15px 0;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-            min-width: 80px;
-            flex: 1;
-            max-width: 100px;
         }
 
-        .stat-value {
-            font-size: 1.8em;
+        .result-value {
+            font-size: 3em;
             font-weight: bold;
             color: #667eea;
         }
 
-        .stat-label {
+        .result-label {
             color: #666;
-            font-size: 0.75em;
-            margin-top: 3px;
+            font-size: 0.9em;
+            margin-top: 5px;
         }
 
         #canvas-container {
@@ -180,7 +167,7 @@
             max-width: 100%;
         }
 
-        #output-canvas {
+        #canvas-container canvas {
             max-width: 100%;
             height: auto;
         }
@@ -194,18 +181,13 @@
                 font-size: 1.2em;
             }
 
-            .filter-btn {
-                padding: 8px 12px;
+            .mode-btn {
+                padding: 10px 15px;
                 font-size: 0.8em;
             }
 
-            .stat-box {
-                min-width: 60px;
-                padding: 10px;
-            }
-
-            .stat-value {
-                font-size: 1.5em;
+            .result-value {
+                font-size: 2.5em;
             }
         }
     </style>
@@ -213,17 +195,18 @@
 
 <body>
     <div class="container">
-        <h2>📊 Analizador de Asistencia (DETR)</h2>
+        <h2>📊 Analizador de Aforo</h2>
 
         <div class="gdpr-badge">
             <strong>⚖️ Privacidad:</strong> Procesamiento 100% local con IA de última generación.
         </div>
 
-        <div class="filter-section">
-            <div class="filter-title">¿Qué quieres detectar?</div>
-            <div class="filter-buttons">
-                <button class="filter-btn active" data-filter="people">👥 Personas</button>
-                <button class="filter-btn active" data-filter="animals">🐕 Animales</button>
+        <div class="mode-section">
+            <div class="mode-title">Selecciona el modo de análisis:</div>
+            <div class="mode-buttons">
+                <button class="mode-btn active" data-mode="detection">🎯 Detección<br><small>Personas
+                        individuales</small></button>
+                <button class="mode-btn" data-mode="crowd">👥 Multitud<br><small>Manifestaciones</small></button>
             </div>
         </div>
 
@@ -237,15 +220,9 @@
             <div class="progress-fill" id="progress-fill"></div>
         </div>
 
-        <div class="stats-container" id="stats-display" style="display: none;">
-            <div class="stat-box" id="box-total">
-                <div class="stat-value" id="count-total">-</div>
-                <div class="stat-label">Personas</div>
-            </div>
-            <div class="stat-box" id="box-animals">
-                <div class="stat-value" id="count-animals">-</div>
-                <div class="stat-label">Animales</div>
-            </div>
+        <div class="result-box" id="result-box" style="display: none;">
+            <div class="result-value" id="result-count">0</div>
+            <div class="result-label" id="result-label">Personas detectadas</div>
         </div>
 
         <div id="canvas-container"></div>

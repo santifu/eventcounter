@@ -1,41 +1,37 @@
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0';
 
-// Configure transformers.js
+// Configure
 env.allowLocalModels = false;
 
 // State
 let detector = null;
-let filters = { people: true, animals: true };
+let crowdSession = null;
+let currentMode = 'detection';
+let modelsLoaded = { detection: false, crowd: false };
+
+// ONNX model URL for crowd counting
+const CROWD_MODEL_URL = 'https://huggingface.co/muasifk/crowd-counting-model/resolve/main/crowd_counting_model.onnx';
 
 // Animal labels from COCO dataset
 const ANIMAL_LABELS = ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'];
 
-// Initialize on page load
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
-    setupFilterButtons();
+    setupModeButtons();
     setupUploader();
-    await loadModel();
+    await loadModels();
 }
 
-function setupFilterButtons() {
-    document.querySelectorAll('.filter-btn').forEach(btn => {
+function setupModeButtons() {
+    document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const filterName = btn.dataset.filter;
-            filters[filterName] = !filters[filterName];
-            btn.classList.toggle('active', filters[filterName]);
-            updateStatBoxVisibility();
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentMode = btn.dataset.mode;
+            resetResults();
         });
     });
-    updateStatBoxVisibility();
-}
-
-function updateStatBoxVisibility() {
-    const boxTotal = document.getElementById('box-total');
-    const boxAnimals = document.getElementById('box-animals');
-    if (boxTotal) boxTotal.style.display = filters.people ? 'block' : 'none';
-    if (boxAnimals) boxAnimals.style.display = filters.animals ? 'block' : 'none';
 }
 
 function setupUploader() {
@@ -43,29 +39,49 @@ function setupUploader() {
     uploader.addEventListener('change', handleImageUpload);
 }
 
-async function loadModel() {
-    updateStatus('Descargando modelo DETR (~40MB)...', true);
+async function loadModels() {
+    updateStatus('Cargando modelos de IA...', true);
     showProgress(true);
 
     try {
+        // Load DETR for detection mode
+        updateStatus('Cargando modelo de detección (DETR)...', true);
         detector = await pipeline('object-detection', 'Xenova/detr-resnet-50', {
             progress_callback: (progress) => {
                 if (progress.status === 'progress') {
                     const pct = Math.round((progress.loaded / progress.total) * 100);
-                    setProgress(pct);
-                    updateStatus(`Descargando modelo... ${pct}%`, true);
+                    setProgress(pct / 2); // First half
                 }
             }
         });
+        modelsLoaded.detection = true;
+        console.log('DETR cargado.');
 
+        // Load ONNX crowd model
+        updateStatus('Cargando modelo de multitudes...', true);
+        setProgress(60);
+
+        crowdSession = await ort.InferenceSession.create(CROWD_MODEL_URL, {
+            executionProviders: ['wasm']
+        });
+        modelsLoaded.crowd = true;
+        console.log('Modelo de multitudes cargado.');
+
+        setProgress(100);
         showProgress(false);
         updateStatus('', false);
         enableUpload();
-        console.log('Modelo DETR cargado correctamente.');
+
     } catch (err) {
-        console.error('Error cargando modelo:', err);
-        updateStatus('Error cargando modelo: ' + err.message, true);
+        console.error('Error cargando modelos:', err);
+        updateStatus('Error: ' + err.message, true);
         showProgress(false);
+
+        // Enable upload if at least detection works
+        if (modelsLoaded.detection) {
+            enableUpload();
+            updateStatus('Modo multitud no disponible. Detección activa.', true);
+        }
     }
 }
 
@@ -77,56 +93,51 @@ function enableUpload() {
 
 async function handleImageUpload(e) {
     const file = e.target.files[0];
-    if (!file || !detector) return;
+    if (!file) return;
 
     updateStatus('Analizando imagen...', true);
-    resetStats();
+    resetResults();
 
-    // Create image element
     const img = new Image();
     img.onload = async () => {
-        await analyzeImage(img);
+        if (currentMode === 'detection') {
+            await analyzeDetection(img);
+        } else {
+            await analyzeCrowd(img);
+        }
     };
     img.src = URL.createObjectURL(file);
 }
 
-async function analyzeImage(img) {
+// === DETECTION MODE ===
+async function analyzeDetection(img) {
+    if (!detector) {
+        updateStatus('Modelo de detección no disponible', true);
+        return;
+    }
+
     try {
-        // Run detection
         const results = await detector(img.src, { threshold: 0.7 });
 
-        console.log('Detecciones:', results);
-
-        // Filter and count
         const people = results.filter(r => r.label === 'person');
         const animals = results.filter(r => ANIMAL_LABELS.includes(r.label));
+        const count = people.length + animals.length;
 
-        // Update stats
-        document.getElementById('stats-display').style.display = 'flex';
-
-        if (filters.people) {
-            document.getElementById('count-total').innerText = people.length;
-        }
-        if (filters.animals) {
-            document.getElementById('count-animals').innerText = animals.length;
-        }
-
-        // Draw on canvas
-        drawResults(img, results);
-
+        showResult(people.length, 'Personas detectadas');
+        drawDetectionResults(img, results);
         updateStatus('', false);
+
     } catch (err) {
-        console.error('Error en análisis:', err);
+        console.error('Error en detección:', err);
         updateStatus('Error: ' + err.message, true);
     }
 }
 
-function drawResults(img, results) {
+function drawDetectionResults(img, results) {
     const container = document.getElementById('canvas-container');
     container.innerHTML = '';
 
     const canvas = document.createElement('canvas');
-    canvas.id = 'output-canvas';
     canvas.width = img.width;
     canvas.height = img.height;
     container.appendChild(canvas);
@@ -134,30 +145,18 @@ function drawResults(img, results) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
 
-    results.forEach(result => {
-        const { label, score, box } = result;
-        const { xmin, ymin, xmax, ymax } = box;
-
-        // Determine if we should draw this
+    results.forEach(({ label, score, box }) => {
         const isPerson = label === 'person';
         const isAnimal = ANIMAL_LABELS.includes(label);
+        if (!isPerson && !isAnimal) return;
 
-        if ((isPerson && !filters.people) || (isAnimal && !filters.animals)) {
-            return;
-        }
-        if (!isPerson && !isAnimal) {
-            return; // Skip other objects
-        }
-
-        // Colors
+        const { xmin, ymin, xmax, ymax } = box;
         const color = isPerson ? '#00c853' : '#ff9800';
 
-        // Draw box
         ctx.strokeStyle = color;
         ctx.lineWidth = 3;
         ctx.strokeRect(xmin, ymin, xmax - xmin, ymax - ymin);
 
-        // Draw label
         const labelText = `${label} ${Math.round(score * 100)}%`;
         ctx.font = 'bold 14px Arial';
         const textWidth = ctx.measureText(labelText).width;
@@ -170,13 +169,161 @@ function drawResults(img, results) {
     });
 }
 
-function resetStats() {
-    document.getElementById('stats-display').style.display = 'none';
-    document.getElementById('count-total').innerText = '-';
-    document.getElementById('count-animals').innerText = '-';
+// === CROWD MODE ===
+async function analyzeCrowd(img) {
+    if (!crowdSession) {
+        updateStatus('Modelo de multitudes no disponible', true);
+        return;
+    }
 
+    try {
+        updateStatus('Procesando mapa de densidad...', true);
+
+        // Prepare image for ONNX
+        const inputSize = 512;
+        const { tensor, originalWidth, originalHeight } = await prepareImageForONNX(img, inputSize);
+
+        // Run inference
+        const feeds = { input: tensor };
+        const output = await crowdSession.run(feeds);
+
+        // Get density map
+        const densityMap = output[Object.keys(output)[0]];
+        const densityData = densityMap.data;
+
+        // Calculate total count (sum of density map)
+        let totalCount = 0;
+        for (let i = 0; i < densityData.length; i++) {
+            totalCount += densityData[i];
+        }
+        totalCount = Math.round(totalCount);
+
+        showResult(totalCount, 'Personas estimadas (densidad)');
+        drawDensityHeatmap(img, densityData, densityMap.dims);
+        updateStatus('', false);
+
+    } catch (err) {
+        console.error('Error en conteo de multitudes:', err);
+        updateStatus('Error: ' + err.message, true);
+    }
+}
+
+async function prepareImageForONNX(img, targetSize) {
+    const canvas = document.createElement('canvas');
+    canvas.width = targetSize;
+    canvas.height = targetSize;
+    const ctx = canvas.getContext('2d');
+
+    // Resize maintaining aspect ratio
+    const scale = Math.min(targetSize / img.width, targetSize / img.height);
+    const scaledWidth = img.width * scale;
+    const scaledHeight = img.height * scale;
+    const offsetX = (targetSize - scaledWidth) / 2;
+    const offsetY = (targetSize - scaledHeight) / 2;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, targetSize, targetSize);
+    ctx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+
+    const imageData = ctx.getImageData(0, 0, targetSize, targetSize);
+    const { data } = imageData;
+
+    // Normalize and convert to tensor (CHW format)
+    const floatData = new Float32Array(3 * targetSize * targetSize);
+    const mean = [0.485, 0.456, 0.406];
+    const std = [0.229, 0.224, 0.225];
+
+    for (let i = 0; i < targetSize * targetSize; i++) {
+        const r = data[i * 4] / 255;
+        const g = data[i * 4 + 1] / 255;
+        const b = data[i * 4 + 2] / 255;
+
+        floatData[i] = (r - mean[0]) / std[0];
+        floatData[targetSize * targetSize + i] = (g - mean[1]) / std[1];
+        floatData[2 * targetSize * targetSize + i] = (b - mean[2]) / std[2];
+    }
+
+    const tensor = new ort.Tensor('float32', floatData, [1, 3, targetSize, targetSize]);
+
+    return { tensor, originalWidth: img.width, originalHeight: img.height };
+}
+
+function drawDensityHeatmap(img, densityData, dims) {
     const container = document.getElementById('canvas-container');
     container.innerHTML = '';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    container.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    // Create heatmap overlay
+    const heatmapCanvas = document.createElement('canvas');
+    const heatmapWidth = dims[3] || dims[2] || 64;
+    const heatmapHeight = dims[2] || dims[1] || 64;
+    heatmapCanvas.width = heatmapWidth;
+    heatmapCanvas.height = heatmapHeight;
+    const heatmapCtx = heatmapCanvas.getContext('2d');
+
+    // Find max value for normalization
+    let maxVal = 0;
+    for (let i = 0; i < densityData.length; i++) {
+        if (densityData[i] > maxVal) maxVal = densityData[i];
+    }
+
+    // Draw heatmap
+    const heatmapImageData = heatmapCtx.createImageData(heatmapWidth, heatmapHeight);
+    for (let i = 0; i < densityData.length; i++) {
+        const normalized = maxVal > 0 ? densityData[i] / maxVal : 0;
+        const color = getHeatmapColor(normalized);
+        heatmapImageData.data[i * 4] = color.r;
+        heatmapImageData.data[i * 4 + 1] = color.g;
+        heatmapImageData.data[i * 4 + 2] = color.b;
+        heatmapImageData.data[i * 4 + 3] = Math.floor(normalized * 180); // Semi-transparent
+    }
+    heatmapCtx.putImageData(heatmapImageData, 0, 0);
+
+    // Overlay heatmap on original image
+    ctx.drawImage(heatmapCanvas, 0, 0, img.width, img.height);
+}
+
+function getHeatmapColor(value) {
+    // Blue -> Cyan -> Green -> Yellow -> Red
+    const colors = [
+        { r: 0, g: 0, b: 255 },    // Blue (low)
+        { r: 0, g: 255, b: 255 },  // Cyan
+        { r: 0, g: 255, b: 0 },    // Green
+        { r: 255, g: 255, b: 0 },  // Yellow
+        { r: 255, g: 0, b: 0 }     // Red (high)
+    ];
+
+    const idx = value * (colors.length - 1);
+    const lower = Math.floor(idx);
+    const upper = Math.ceil(idx);
+    const t = idx - lower;
+
+    if (lower === upper) return colors[lower];
+
+    return {
+        r: Math.round(colors[lower].r + t * (colors[upper].r - colors[lower].r)),
+        g: Math.round(colors[lower].g + t * (colors[upper].g - colors[lower].g)),
+        b: Math.round(colors[lower].b + t * (colors[upper].b - colors[lower].b))
+    };
+}
+
+// === UI HELPERS ===
+function showResult(count, label) {
+    document.getElementById('result-box').style.display = 'block';
+    document.getElementById('result-count').textContent = count;
+    document.getElementById('result-label').textContent = label;
+}
+
+function resetResults() {
+    document.getElementById('result-box').style.display = 'none';
+    document.getElementById('canvas-container').innerHTML = '';
 }
 
 function updateStatus(msg, show) {
