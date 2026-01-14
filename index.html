@@ -4,10 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Analizador de Aforo - Privacidad Garantizada</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
-    <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <title>Analizador de Aforo - IA Local</title>
     <style>
         * {
             box-sizing: border-box;
@@ -45,7 +42,6 @@
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
 
-        /* Filter Buttons */
         .filter-section {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 16px;
@@ -90,7 +86,6 @@
             transform: scale(1.05);
         }
 
-        /* Upload Button */
         .upload-section {
             margin-bottom: 15px;
         }
@@ -114,14 +109,14 @@
 
         .upload-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(17, 153, 142, 0.5);
         }
 
-        .upload-btn:active {
-            transform: scale(0.98);
+        .upload-btn.disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
         }
 
-        /* Status Message */
         #status-message {
             margin: 15px 0;
             font-weight: bold;
@@ -129,7 +124,22 @@
             text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
         }
 
-        /* Stats Display */
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #38ef7d, #11998e);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
         .stats-container {
             display: flex;
             justify-content: center;
@@ -160,7 +170,6 @@
             margin-top: 3px;
         }
 
-        /* Canvas Container */
         #canvas-container {
             position: relative;
             display: inline-block;
@@ -171,12 +180,11 @@
             max-width: 100%;
         }
 
-        #canvas-container canvas {
+        #output-canvas {
             max-width: 100%;
-            height: auto !important;
+            height: auto;
         }
 
-        /* Mobile optimizations */
         @media (max-width: 480px) {
             body {
                 padding: 10px;
@@ -205,44 +213,34 @@
 
 <body>
     <div class="container">
-        <h2>📊 Analizador de Asistencia</h2>
+        <h2>📊 Analizador de Asistencia (DETR)</h2>
 
         <div class="gdpr-badge">
-            <strong>⚖️ Privacidad:</strong> Procesamiento 100% local. Las fotos <u>nunca</u> salen de tu dispositivo.
+            <strong>⚖️ Privacidad:</strong> Procesamiento 100% local con IA de última generación.
         </div>
 
         <div class="filter-section">
             <div class="filter-title">¿Qué quieres detectar?</div>
             <div class="filter-buttons">
                 <button class="filter-btn active" data-filter="people">👥 Personas</button>
-                <button class="filter-btn active" data-filter="demographics">👨‍👩‍👧 Demografía</button>
                 <button class="filter-btn active" data-filter="animals">🐕 Animales</button>
             </div>
         </div>
 
         <div class="upload-section">
             <input type="file" id="uploader" accept="image/*" capture="environment">
-            <label for="uploader" class="upload-btn">📷 Seleccionar Imagen</label>
+            <label for="uploader" class="upload-btn disabled" id="upload-label">⏳ Cargando IA...</label>
         </div>
 
         <div id="status-message"></div>
+        <div class="progress-bar" id="progress-bar" style="display: none;">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
 
         <div class="stats-container" id="stats-display" style="display: none;">
             <div class="stat-box" id="box-total">
                 <div class="stat-value" id="count-total">-</div>
                 <div class="stat-label">Personas</div>
-            </div>
-            <div class="stat-box" id="box-men">
-                <div class="stat-value" id="count-men">-</div>
-                <div class="stat-label">Hombres</div>
-            </div>
-            <div class="stat-box" id="box-women">
-                <div class="stat-value" id="count-women">-</div>
-                <div class="stat-label">Mujeres</div>
-            </div>
-            <div class="stat-box" id="box-children">
-                <div class="stat-value" id="count-children">-</div>
-                <div class="stat-label">Niños</div>
             </div>
             <div class="stat-box" id="box-animals">
                 <div class="stat-value" id="count-animals">-</div>
@@ -253,7 +251,7 @@
         <div id="canvas-container"></div>
     </div>
 
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 
 </html>
