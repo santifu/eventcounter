@@ -4,190 +4,194 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Analizador de Aforo - IA Local</title>
+    <title>Contador de Aforo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            text-align: center;
-            padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f8f9fa;
+            color: #1a1a2e;
             min-height: 100vh;
-            margin: 0;
-            color: #333;
+            padding: 24px;
         }
 
         .container {
-            max-width: 600px;
+            max-width: 480px;
             margin: 0 auto;
         }
 
-        h2 {
-            color: white;
-            font-size: 1.4em;
-            margin-bottom: 15px;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #1a1a2e;
         }
 
-        .gdpr-badge {
-            background: rgba(255, 255, 255, 0.95);
-            color: #01579b;
-            padding: 12px;
+        .subtitle {
+            font-size: 0.875rem;
+            color: #6b7280;
+            margin-bottom: 32px;
+        }
+
+        .card {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
             border-radius: 12px;
-            margin-bottom: 20px;
-            font-size: 0.85em;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 16px;
         }
 
-        .mode-section {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 16px;
-            padding: 15px;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .mode-title {
-            font-weight: 600;
-            color: #555;
-            margin-bottom: 10px;
-            font-size: 0.9em;
-        }
-
-        .mode-buttons {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-        }
-
-        .mode-btn {
-            padding: 12px 20px;
-            border: 2px solid #667eea;
-            background: white;
-            border-radius: 25px;
-            font-size: 0.9em;
+        .upload-area {
+            border: 2px dashed #d1d5db;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
             cursor: pointer;
             transition: all 0.2s ease;
-            color: #667eea;
+            background: #fafafa;
+        }
+
+        .upload-area:hover {
+            border-color: #9ca3af;
+            background: #f5f5f5;
+        }
+
+        .upload-area.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .upload-icon {
+            font-size: 2rem;
+            margin-bottom: 12px;
+        }
+
+        .upload-text {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+
+        .upload-text strong {
+            color: #1a1a2e;
             font-weight: 500;
-            flex: 1;
-        }
-
-        .mode-btn.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-color: transparent;
-        }
-
-        .upload-section {
-            margin-bottom: 15px;
         }
 
         #uploader {
             display: none;
         }
 
-        .upload-btn {
-            display: inline-block;
-            padding: 15px 30px;
-            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-            color: white;
-            border-radius: 30px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            box-shadow: 0 4px 15px rgba(17, 153, 142, 0.4);
-            transition: all 0.2s ease;
-        }
-
-        .upload-btn:hover {
-            transform: translateY(-2px);
-        }
-
-        .upload-btn.disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            box-shadow: none;
-        }
-
         #status-message {
-            margin: 15px 0;
-            font-weight: bold;
-            color: white;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            font-size: 0.875rem;
+            color: #6b7280;
+            margin: 16px 0;
         }
 
-        .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 3px;
-            margin: 10px 0;
+        .results {
+            display: none;
+        }
+
+        .result-header {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+        }
+
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .result-row:last-child {
+            border-bottom: none;
+        }
+
+        .result-label {
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+
+        .result-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a1a2e;
+        }
+
+        .result-total {
+            background: #f0fdf4;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .result-total .result-label {
+            font-weight: 500;
+            color: #166534;
+        }
+
+        .result-total .result-value {
+            font-size: 1.75rem;
+            color: #166534;
+        }
+
+        .result-note {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        #canvas-container {
+            margin-top: 16px;
+            border-radius: 12px;
             overflow: hidden;
+            display: none;
         }
 
-        .progress-fill {
+        #canvas-container canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .loading-bar {
+            height: 4px;
+            background: #e5e7eb;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 16px 0;
+            display: none;
+        }
+
+        .loading-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #38ef7d, #11998e);
+            background: #1a1a2e;
             width: 0%;
             transition: width 0.3s ease;
         }
 
-        .result-box {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 20px;
-            border-radius: 16px;
-            margin: 15px 0;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .result-value {
-            font-size: 3em;
-            font-weight: bold;
-            color: #667eea;
-        }
-
-        .result-label {
-            color: #666;
-            font-size: 0.9em;
-            margin-top: 5px;
-        }
-
-        #canvas-container {
-            position: relative;
-            display: inline-block;
-            margin-top: 15px;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-            max-width: 100%;
-        }
-
-        #canvas-container canvas {
-            max-width: 100%;
-            height: auto;
-        }
-
         @media (max-width: 480px) {
             body {
-                padding: 10px;
+                padding: 16px;
             }
 
-            h2 {
-                font-size: 1.2em;
-            }
-
-            .mode-btn {
-                padding: 10px 15px;
-                font-size: 0.8em;
-            }
-
-            .result-value {
-                font-size: 2.5em;
+            h1 {
+                font-size: 1.25rem;
             }
         }
     </style>
@@ -195,34 +199,42 @@
 
 <body>
     <div class="container">
-        <h2>📊 Analizador de Aforo</h2>
+        <h1>Contador de Aforo</h1>
+        <p class="subtitle">Análisis local con inteligencia artificial</p>
 
-        <div class="gdpr-badge">
-            <strong>⚖️ Privacidad:</strong> Procesamiento 100% local con IA de última generación.
-        </div>
-
-        <div class="mode-section">
-            <div class="mode-title">Selecciona el modo de análisis:</div>
-            <div class="mode-buttons">
-                <button class="mode-btn active" data-mode="detection">🎯 Detección<br><small>Personas
-                        individuales</small></button>
-                <button class="mode-btn" data-mode="crowd">👥 Multitud<br><small>Manifestaciones</small></button>
-            </div>
-        </div>
-
-        <div class="upload-section">
+        <div class="card">
+            <label for="uploader" class="upload-area disabled" id="upload-label">
+                <div class="upload-icon">📷</div>
+                <div class="upload-text" id="upload-text">Cargando modelos...</div>
+            </label>
             <input type="file" id="uploader" accept="image/*" capture="environment">
-            <label for="uploader" class="upload-btn disabled" id="upload-label">⏳ Cargando IA...</label>
+        </div>
+
+        <div class="loading-bar" id="loading-bar">
+            <div class="loading-bar-fill" id="loading-bar-fill"></div>
         </div>
 
         <div id="status-message"></div>
-        <div class="progress-bar" id="progress-bar" style="display: none;">
-            <div class="progress-fill" id="progress-fill"></div>
-        </div>
 
-        <div class="result-box" id="result-box" style="display: none;">
-            <div class="result-value" id="result-count">0</div>
-            <div class="result-label" id="result-label">Personas detectadas</div>
+        <div class="card results" id="results">
+            <div class="result-header">Resultados del análisis</div>
+
+            <div class="result-row">
+                <span class="result-label">🎯 Detección (DETR)</span>
+                <span class="result-value" id="count-detection">-</span>
+            </div>
+
+            <div class="result-row" id="row-crowd">
+                <span class="result-label">👥 Densidad (CSRNet)</span>
+                <span class="result-value" id="count-crowd">-</span>
+            </div>
+
+            <div class="result-total">
+                <span class="result-label">Estimación final</span>
+                <span class="result-value" id="count-total">-</span>
+            </div>
+
+            <p class="result-note" id="result-note"></p>
         </div>
 
         <div id="canvas-container"></div>
