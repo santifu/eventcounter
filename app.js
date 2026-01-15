@@ -4,6 +4,8 @@ env.allowLocalModels = false;
 
 let detector = null;
 let crowdSession = null;
+let clipSession = null;
+let clipTokenizer = null;
 let faceApiReady = false;
 let currentImage = null; // Store current image for recalculation
 
@@ -73,6 +75,26 @@ async function loadModels() {
             console.warn('FaceAPI not available:', e);
         }
 
+        // 4. CLIP (Deep Analysis)
+        // We load this lazily or here? Let's load tokenizer here, model is big.
+        // Actually, let's load it here to be ready.
+        setProgress(90, 'Loading CLIP (Deep Analysis)...');
+        try {
+            const { AutoTokenizer, AutoProcessor, CLIPTextModelWithProjection, CLIPVisionModelWithProjection } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0');
+
+            // We'll use a wrapper or just the pipeline if available.
+            // Pipeline 'zero-shot-image-classification' is easiest.
+            clipSession = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
+                progress_callback: (p) => {
+                    if (p.status === 'progress' && p.total) {
+                        // Optional progress update
+                    }
+                }
+            });
+        } catch (e) {
+            console.warn('CLIP failed:', e);
+        }
+
         setProgress(100, 'Ready!');
         setTimeout(() => {
             hideProgress();
@@ -112,10 +134,12 @@ async function analyzeImage(img) {
     // Check toggles
     const useCrowd = document.getElementById('toggle-crowd').checked;
     const useFace = document.getElementById('toggle-face').checked;
+    const useClip = document.getElementById('toggle-clip').checked;
 
     let detectorResults = [];
     let crowdCount = null;
     let faceResults = [];
+    let clipResults = null;
 
     // 1. DETR (Always run)
     try {
@@ -150,8 +174,18 @@ async function analyzeImage(img) {
         }
     }
 
+    // 4. CLIP Analysis
+    if (useClip && clipSession && detectorResults.length > 0) {
+        showStatus('<span class="spinner"></span> Deep Analysis (CLIP)... this may take a while');
+        try {
+            clipResults = await runClipAnalysis(img, detectorResults);
+        } catch (err) {
+            console.error('CLIP error:', err);
+        }
+    }
+
     hideStatus();
-    showResults(detectorResults, crowdCount, faceResults, useCrowd);
+    showResults(detectorResults, crowdCount, faceResults, clipResults, useCrowd);
     drawDetections(img, detectorResults, faceResults);
 }
 
@@ -181,7 +215,66 @@ async function runCrowdModel(img) {
     return Math.round(count);
 }
 
-function showResults(detrResults, crowdCount, faceResults, useCrowd) {
+async function runClipAnalysis(img, detections) {
+    // Filter for persons
+    const persons = detections.filter(d => d.label === 'person');
+    if (persons.length === 0) return null;
+
+    let stats = { men: 0, women: 0, child: 0, total: 0 };
+    const classes = ['man', 'woman', 'child'];
+
+    // Create a canvas to crop images
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    // Limit to first 20 people to avoid browser crash/hang on huge crowds
+    const limit = Math.min(persons.length, 20);
+
+    for (let i = 0; i < limit; i++) {
+        const box = persons[i].box;
+        const w = box.xmax - box.xmin;
+        const h = box.ymax - box.ymin;
+
+        // Skip tiny boxes
+        if (w < 20 || h < 20) continue;
+
+        try {
+            // Get crop
+            const cropData = ctx.getImageData(box.xmin, box.ymin, w, h);
+            // Create a temporary canvas for the crop to pass as image URL or blob
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = w;
+            cropCanvas.height = h;
+            cropCanvas.getContext('2d').putImageData(cropData, 0, 0);
+            const cropUrl = cropCanvas.toDataURL();
+
+            // Run CLIP
+            const output = await clipSession(cropUrl, classes);
+            // output usually sorted by score. output[0] is best match.
+            const best = output[0].label;
+
+            if (best === 'man') stats.men++;
+            else if (best === 'woman') stats.women++;
+            else if (best === 'child') stats.child++;
+
+            stats.total++;
+
+            // Allow UI update
+            await new Promise(r => setTimeout(r, 10));
+            showStatus(`<span class="spinner"></span> Deep Analysis: ${i + 1}/${limit} persons...`);
+
+        } catch (e) {
+            console.warn('CLIP crop error', e);
+        }
+    }
+
+    return stats;
+}
+
+function showResults(detrResults, crowdCount, faceResults, clipResults, useCrowd) {
     const grid = document.getElementById('result-grid');
     grid.innerHTML = '';
 
@@ -228,6 +321,25 @@ function showResults(detrResults, crowdCount, faceResults, useCrowd) {
             `;
             grid.appendChild(item);
         }
+    }
+
+    // -- CLIP Breakdown --
+    if (clipResults && clipResults.total > 0) {
+        // Add divider or distinct style
+        const item = document.createElement('div');
+        item.className = 'result-item';
+        item.style.background = '#e0e7ff'; // Indigo
+        item.style.gridColumn = "1 / -1"; // Full width
+        item.innerHTML = `
+            <div style="font-size:0.8rem; font-weight:bold; margin-bottom:4px;">Deep Analysis (Body)</div>
+            <div style="display:flex; justify-content:space-around; font-size:0.9rem;">
+                <span>👨 ${clipResults.men}</span>
+                <span>👩 ${clipResults.women}</span>
+                <span>👶 ${clipResults.child}</span>
+            </div>
+            <div style="font-size:0.6rem; color:#4338ca; margin-top:2px;">Sample: ${clipResults.total} persons</div>
+        `;
+        grid.appendChild(item);
     }
 
     // -- Crowd count --
