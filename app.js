@@ -200,6 +200,36 @@ function showResults(detrResults, crowdCount, faceResults, useCrowd) {
         grid.appendChild(item);
     });
 
+    // -- Gender Breakdown in Grid --
+    if (faceResults.length > 0) {
+        let males = 0;
+        let females = 0;
+        faceResults.forEach(f => f.gender === 'male' ? males++ : females++);
+
+        if (males > 0) {
+            const item = document.createElement('div');
+            item.className = 'result-item';
+            // Light blue background for men
+            item.style.background = '#eff6ff';
+            item.innerHTML = `
+                <div class="result-item-value">${males}</div>
+                <div class="result-item-label">👨 Men</div>
+            `;
+            grid.appendChild(item);
+        }
+        if (females > 0) {
+            const item = document.createElement('div');
+            item.className = 'result-item';
+            // Light pink background for women
+            item.style.background = '#fdf2f8';
+            item.innerHTML = `
+                <div class="result-item-value">${females}</div>
+                <div class="result-item-label">👩 Women</div>
+            `;
+            grid.appendChild(item);
+        }
+    }
+
     // -- Crowd count --
     if (crowdCount !== null) {
         const item = document.createElement('div');
@@ -247,7 +277,15 @@ function showResults(detrResults, crowdCount, faceResults, useCrowd) {
             </div>
         `;
     } else {
-        demoSection.style.display = 'none';
+        // If toggle was on but no faces found
+        if (document.getElementById('toggle-face').checked) {
+            demoSection.style.display = 'block';
+            demoList.innerHTML = `<div class="result-list-item" style="color:#d97706">
+                ⚠️ Demographics enabled but no faces detected clearly.
+            </div>`;
+        } else {
+            demoSection.style.display = 'none';
+        }
     }
 
     // -- Final Count Logic --
