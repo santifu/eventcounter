@@ -5,6 +5,7 @@ env.allowLocalModels = false;
 let detector = null;
 let crowdSession = null;
 let faceApiReady = false;
+let currentImage = null; // Store current image for recalculation
 
 const CROWD_MODEL_URL = 'https://huggingface.co/muasifk/CSRNet/resolve/main/model1_A.onnx';
 
@@ -30,6 +31,9 @@ async function init() {
 
 function setupUploader() {
     document.getElementById('uploader').addEventListener('change', handleImageUpload);
+    document.getElementById('recalc-btn').addEventListener('click', () => {
+        if (currentImage) analyzeImage(currentImage);
+    });
 }
 
 async function loadModels() {
@@ -96,7 +100,11 @@ async function handleImageUpload(e) {
     showStatus('<span class="spinner"></span> Analyzing image...');
 
     const img = new Image();
-    img.onload = () => analyzeImage(img);
+    img.onload = () => {
+        currentImage = img;
+        document.getElementById('recalc-container').style.display = 'block';
+        analyzeImage(img);
+    };
     img.src = URL.createObjectURL(file);
 }
 
