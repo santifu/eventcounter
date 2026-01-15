@@ -7,6 +7,7 @@
     <title>Ruractive EquityLens</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -47,7 +48,78 @@
             margin-bottom: 16px;
         }
 
-        /* Progress - VISIBLE BY DEFAULT during load */
+        /* Settings */
+        .settings-section {
+            margin-bottom: 16px;
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding: 8px 0;
+        }
+
+        .toggle-label {
+            font-size: 0.9rem;
+            color: #374151;
+            font-weight: 500;
+        }
+
+        .toggle-sub {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            display: block;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #e5e7eb;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        input:checked+.slider {
+            background-color: #4f46e5;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Progress - VISIBLE by default */
         .progress-section {
             background: #fff;
             border: 1px solid #e5e7eb;
@@ -138,6 +210,16 @@
             text-transform: uppercase;
             letter-spacing: 0.05em;
             margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .model-tag {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #f3f4f6;
+            color: #6b7280;
         }
 
         .result-grid {
@@ -145,6 +227,18 @@
             grid-template-columns: repeat(3, 1fr);
             gap: 12px;
             margin-bottom: 16px;
+        }
+
+        .result-list {
+            margin-bottom: 16px;
+        }
+
+        .result-list-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #f3f4f6;
+            font-size: 0.9rem;
         }
 
         .result-item {
@@ -249,6 +343,30 @@
         <h1>Ruractive EquityLens</h1>
         <p class="subtitle">Local AI-powered crowd analysis</p>
 
+        <!-- Use Options -->
+        <div class="card settings-section">
+            <div class="toggle-row">
+                <div class="toggle-text">
+                    <div class="toggle-label">Crowd Density Mode</div>
+                    <span class="toggle-sub">For large crowds (CSRNet)</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-crowd">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="toggle-row">
+                <div class="toggle-text">
+                    <div class="toggle-label">Demographics</div>
+                    <span class="toggle-sub">Gender & Age (FaceAPI)</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-face">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
         <!-- GDPR Notice -->
         <div class="card" style="background: #f0fdf4; border-color: #bbf7d0; margin-bottom: 16px; padding: 12px 16px;">
             <p style="font-size: 0.8rem; color: #166534; margin: 0;">
@@ -282,10 +400,21 @@
 
         <!-- Results -->
         <div class="card results" id="results">
-            <div class="result-header">Detected Objects</div>
+            <div class="result-header">
+                <span>Detected Objects</span>
+                <span class="model-tag">Model: DETR</span>
+            </div>
 
             <div class="result-grid" id="result-grid">
                 <!-- Dynamic content -->
+            </div>
+
+            <div id="demographics-section" style="display:none; margin-bottom: 16px;">
+                <div class="result-header">
+                    <span>Demographics</span>
+                    <span class="model-tag">Model: FaceAPI</span>
+                </div>
+                <div class="result-list" id="demographics-list"></div>
             </div>
 
             <div class="result-total">
